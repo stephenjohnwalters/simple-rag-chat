@@ -1,69 +1,120 @@
-# Simple RAG Chat (CLI)
+# Simple RAG Chat
 
-Backend-only Retrieval-Augmented Generation over local markdown docs.  Designed for technical screening: the implementation is complete but contains an intentionally buggy similarity function for review.
+A command-line Retrieval-Augmented Generation (RAG) system that answers questions about company documentation using OpenAI embeddings and chat completion.
 
-## What’s Inside
+## Architecture
 
-- **`src/rag-cli.ts`** – all logic: chunking, embedding cache, retrieval, CLI loop.
-- **`data/company-data/*.md`** – 20 diverse docs used as knowledge base.
-- **`.cache/embeddings.json`** – created on first run; stores chunks + embeddings.
-- **`setup.sh` / `setup.ps1`** – one-shot environment bootstrap (macOS/Linux or Windows).
+The system consists of three main components:
+
+### 1. EmbeddingsService (`src/embeddings-service.ts`)
+Manages document processing and vector search:
+- **Chunking**: Splits markdown files into 400-character chunks
+- **Embedding**: Generates vector embeddings via OpenAI API
+- **Caching**: Persists embeddings to disk (`.cache/embeddings.json`)
+- **Search**: Performs cosine similarity search over cached embeddings
+
+### 2. RAG CLI (`src/rag-cli.ts`)
+Interactive command-line interface:
+- **Query generation**: Uses LLM to propose search queries
+- **Multi-search**: Retrieves relevant chunks using multiple queries
+- **Answer generation**: Synthesizes answers from retrieved context
+
+### 3. Company Data (`data/company-data/`)
+Knowledge base of 20 markdown documents covering policies, procedures, and company information.
 
 ## Quick Start
 
 ```bash
-# macOS / Linux
-git clone https://example.com/simple-rag-chat.git
+# Clone and setup
+git clone <repository-url>
 cd simple-rag-chat
-./setup.sh              # installs Node via Volta, builds project
+./setup.sh              # macOS/Linux: installs Node 18, dependencies
 
-# Windows PowerShell
-git clone https://example.com/simple-rag-chat.git
-cd simple-rag-chat
+# Or on Windows
 powershell -ExecutionPolicy Bypass -File setup.ps1
 
-# run
-npx rag                  # or: node dist/rag-cli.js
+# Set API key
+export OPENAI_API_KEY="sk-..."
+
+# Run
+npx rag
 ```
 
-### Live vs. Mock Mode
+If the API key is not set, the CLI will prompt for it interactively.
 
-| Scenario | Environment variable | Behaviour |
-|----------|----------------------|-----------|
-| **Live** embeddings & LLM | `OPENAI_API_KEY=<key>` | Calls OpenAI for embeddings + chat completions |
-| **Mock** (default) | Variable unset | Deterministic SHA-based embeddings and stubbed chat replies |
+## Usage
 
-## CLI Usage
-
-```
-Simple RAG CLI. Type 'exit' to quit.
-
-> what is the parental leave policy
-16 weeks fully paid (see Benefits Overview).
-```
-
-Command `train` is stubbed for candidates to implement:
+### Interactive Mode
 
 ```bash
-node dist/rag-cli.js train   # TODO: ingest new files and persist embeddings
+npx rag
+
+> what is the vacation policy
+Employees accrue 20 days of paid time off per calendar year, in addition to
+local public holidays.
+
+> exit
+```
+
+### Rebuild Cache
+
+Force rebuild of the embeddings cache (useful after adding/modifying documents):
+
+```bash
+npx rag train
 ```
 
 ## How It Works
 
-1. **Chunk & Embed** – Markdown files are split every 400 characters, embedded (`text-embedding-ada-002`) and cached.
-2. **Question → Query Proposals** – LLM suggests 2-4 search queries in JSON.
-3. **Vector Search** – For each query, top-K similar chunks are fetched.  *Similarity is intentionally wrong* – see `buggySimilarity` in source.
-4. **Answer Generation** – Chosen chunks are injected as context and the LLM answers strictly from them.
+1. **Initialization**: On first run, documents are chunked and embedded via `text-embedding-3-small`, then cached
+2. **Query Processing**: User questions are sent to GPT-3.5 to generate 2-4 search queries
+3. **Vector Search**: Each query is embedded and compared against cached embeddings using cosine similarity
+4. **Context Assembly**: Top matching chunks are combined into a context string
+5. **Answer Generation**: GPT-3.5 answers based strictly on the provided context
 
-## Intentionally Buggy Retrieval
+## Files
 
-`buggySimilarity` uses `1 / ∑(Δ²)` instead of cosine similarity.  Reviewing candidates should spot and fix this.
+```
+simple-rag-chat/
+├── src/
+│   ├── embeddings-service.ts    # Vector search and caching
+│   └── rag-cli.ts               # CLI and answer generation
+├── data/
+│   └── company-data/            # 20 markdown knowledge base files
+├── .cache/
+│   └── embeddings.json          # Generated on first run (1.3MB)
+├── setup.sh                     # macOS/Linux setup script
+└── setup.ps1                    # Windows setup script
+```
 
 ## Requirements
 
-- Node 18 (setup scripts install automatically).
-- Optional: Docker – add a simple container if your environment blocks installers.
+- Node.js 18+ (installed automatically by setup scripts via Volta)
+- OpenAI API key with access to:
+  - `text-embedding-3-small` model
+  - `gpt-3.5-turbo` model
+
+## Configuration
+
+Key constants in `src/embeddings-service.ts`:
+- `CHUNK_SIZE`: 400 characters per chunk
+- Embedding model: `text-embedding-3-small`
+- Chat model: `gpt-3.5-turbo` (in `src/rag-cli.ts`)
+
+## Development
+
+```bash
+# Build TypeScript
+npm run build
+
+# Type checking
+npx tsc --noEmit
+
+# Clean and rebuild cache
+rm -rf .cache
+npx rag
+```
 
 ---
-© Acme Corp – demo repository for interview use only.
 
+Built with TypeScript, OpenAI API, and Node.js.
