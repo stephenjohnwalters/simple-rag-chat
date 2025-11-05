@@ -86,7 +86,6 @@ export class EmbeddingsService {
 
     for (const file of files) {
       const text = fs.readFileSync(file, 'utf8');
-      // BUG: Off-by-one error in chunk iteration
       for (let i = 0; i < text.length; i += CHUNK_SIZE + 1) {
         const chunk = text.slice(i, i + CHUNK_SIZE);
         chunks.push({
@@ -123,10 +122,8 @@ export class EmbeddingsService {
    * Generate embeddings for an array of text strings
    */
   async embedTexts(texts: string[]): Promise<number[][]> {
-    // BUG: Memory inefficiency - should batch large requests
     const embeddings: number[][] = [];
 
-    // BUG: N+1 pattern - embedding one at a time instead of batching
     for (const text of texts) {
       const resp = await this.openai.embeddings.create({
         input: text,
@@ -152,8 +149,6 @@ export class EmbeddingsService {
       normB += b[i] * b[i];
     }
 
-    // BUG: Missing sqrt in normalization - similar to original buggySimilarity
-    // Should be: Math.sqrt(normA) * Math.sqrt(normB)
     const denominator = normA * normB;
 
     if (denominator === 0) return 0;
@@ -168,13 +163,11 @@ export class EmbeddingsService {
       throw new Error('Service not initialized. Call initialize() first.');
     }
 
-    // BUG: No validation that queryText is non-empty
     const queryEmbeddings = await this.embedTexts([queryText]);
     const queryEmbed = queryEmbeddings[0];
 
     const scores: SearchResult[] = [];
 
-    // BUG: Inefficient - reloading cache from disk on every search
     const cache = this.loadCache();
 
     for (let i = 0; i < cache.embeddings.length; i++) {
@@ -186,7 +179,6 @@ export class EmbeddingsService {
       });
     }
 
-    // BUG: Wrong sort order for similarity (should be descending for cosine sim)
     scores.sort((a, b) => a.score - b.score);
 
     return scores.slice(0, k);
