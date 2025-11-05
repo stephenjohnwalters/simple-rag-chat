@@ -8,95 +8,18 @@
  *  - Interactive ask/answer loop (vector search + LLM)
  *  - Requires OPENAI_API_KEY environment variable
  *  - TODO stub for future `train` command
- *  - Contains an intentionally buggy similarity implementation
  */
 
-import fs from 'fs';
 import path from 'path';
 import readline from 'readline';
 import OpenAI from 'openai';
+import { EmbeddingsService, type Chunk } from './embeddings-service.js';
 
 const DOCS_DIR = path.resolve('data', 'company-data');
 const CACHE_PATH = path.resolve('.cache', 'embeddings.json');
-const CHUNK_SIZE = 400; // characters
-
-type Chunk = { source: string; content: string };
-
-interface CacheFile {
-  chunks: Chunk[];
-  embeddings: number[][];
-}
-
-// ---------------- Embeddings ------------------
 
 let openai: OpenAI;
-
-async function embedTexts(texts: string[]): Promise<number[][]> {
-  const resp = await openai.embeddings.create({
-    input: texts,
-    model: 'text-embedding-3-small'
-  });
-  return resp.data.map((d) => d.embedding);
-}
-
-// --------------- Chunking ---------------------
-
-function loadMarkdownChunks(): Chunk[] {
-  const chunks: Chunk[] = [];
-  if (!fs.existsSync(DOCS_DIR)) return chunks;
-  const files = walkFiles(DOCS_DIR, '.md');
-  for (const file of files) {
-    const text = fs.readFileSync(file, 'utf8');
-    for (let i = 0; i < text.length; i += CHUNK_SIZE) {
-      chunks.push({ source: path.relative('.', file), content: text.slice(i, i + CHUNK_SIZE) });
-    }
-  }
-  return chunks;
-}
-
-function walkFiles(dir: string, ext: string): string[] {
-  let results: string[] = [];
-  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-    const res = path.join(dir, entry.name);
-    if (entry.isDirectory()) results = results.concat(walkFiles(res, ext));
-    else if (entry.isFile() && res.endsWith(ext)) results.push(res);
-  }
-  return results;
-}
-
-// --------------- Cache / Ensure --------------
-
-async function ensureEmbeddings(): Promise<CacheFile> {
-  const dir = path.dirname(CACHE_PATH);
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-
-  if (fs.existsSync(CACHE_PATH)) {
-    const data = JSON.parse(fs.readFileSync(CACHE_PATH, 'utf8')) as CacheFile;
-    return data;
-  }
-
-  const chunks = loadMarkdownChunks();
-  const embeddings = await embedTexts(chunks.map((c) => c.content));
-  const data: CacheFile = { chunks, embeddings };
-  fs.writeFileSync(CACHE_PATH, JSON.stringify(data));
-  return data;
-}
-
-// -------------- Retrieval (buggy) ------------
-
-function buggySimilarity(a: number[], b: number[]): number {
-  // BUG: misses sqrt in Euclidean distance and 0-division edge cases
-  let dist = 0;
-  for (let i = 0; i < a.length; i++) dist += (a[i] - b[i]) ** 2;
-  if (dist === 0) return 1;
-  return 1 / dist;
-}
-
-function retrieve(queryEmbed: number[], embeddings: number[][], k = 4): number[] {
-  const scores = embeddings.map((emb, idx) => ({ idx, score: buggySimilarity(queryEmbed, emb) }));
-  scores.sort((a, b) => b.score - a.score);
-  return scores.slice(0, k).map((s) => s.idx);
-}
+let embeddingsService: EmbeddingsService;
 
 // -------------- LLM Wrapper ------------------
 
@@ -135,22 +58,17 @@ async function proposeSearchQueries(question: string): Promise<string[]> {
   return fallback.length > 0 ? fallback : [question];
 }
 
-function buildContext(indices: number[], chunks: Chunk[]): string {
-  return indices
-    .map((i) => `### Source: ${chunks[i].source}\n${chunks[i].content}`)
+function buildContext(chunks: Chunk[]): string {
+  return chunks
+    .map((chunk) => `### Source: ${chunk.source}\n${chunk.content}`)
     .join('\n');
 }
 
-async function answerQuestion(question: string, state: CacheFile): Promise<string> {
+async function answerQuestion(question: string): Promise<string> {
   const queries = await proposeSearchQueries(question);
-  const queryEmbeds = await embedTexts(queries);
+  const chunks = await embeddingsService.multiSearch(queries, 3);
 
-  const idxSet = new Set<number>();
-  for (const qe of queryEmbeds) {
-    retrieve(qe, state.embeddings, 3).forEach((i) => idxSet.add(i));
-  }
-
-  const context = buildContext(Array.from(idxSet), state.chunks);
+  const context = buildContext(chunks);
 
   const response = await chatCompletion(
     [
@@ -167,7 +85,12 @@ async function answerQuestion(question: string, state: CacheFile): Promise<strin
 
 async function interactiveCLI() {
   console.log('Simple RAG CLI. Type "exit" to quit.');
-  const state = await ensureEmbeddings();
+
+  console.log('Initializing embeddings cache...');
+  await embeddingsService.initialize();
+
+  const stats = embeddingsService.getCacheStats();
+  console.log(`Loaded ${stats.chunkCount} chunks (embedding dim: ${stats.embeddingDim})`);
 
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
   let closed = false;
@@ -184,7 +107,7 @@ async function interactiveCLI() {
         rl.close();
         return;
       }
-      const ans = await answerQuestion(q, state);
+      const ans = await answerQuestion(q);
       console.log('\n' + wrap(ans, 80));
       ask();
     });
@@ -227,10 +150,13 @@ async function promptForAPIKey(): Promise<string> {
   }
 
   openai = new OpenAI({ apiKey });
+  embeddingsService = new EmbeddingsService(openai, DOCS_DIR, CACHE_PATH);
 
   const cmd = process.argv[2];
   if (cmd === 'train') {
-    console.log('TODO: implement train command to ingest new data.');
+    console.log('Rebuilding embeddings cache...');
+    await embeddingsService.rebuildCache();
+    console.log('Cache rebuilt successfully.');
     process.exit(0);
   }
   await interactiveCLI();
