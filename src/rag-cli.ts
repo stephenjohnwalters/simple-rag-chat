@@ -6,7 +6,7 @@
  *  - Load & chunk markdown docs from data/company-data/*.md
  *  - Cache embeddings in .cache/embeddings.json on first run
  *  - Interactive ask/answer loop (vector search + LLM)
- *  - Deterministic mock mode when OPENAI_API_KEY is missing
+ *  - Requires OPENAI_API_KEY environment variable
  *  - TODO stub for future `train` command
  *  - Contains an intentionally buggy similarity implementation
  */
@@ -14,12 +14,11 @@
 import fs from 'fs';
 import path from 'path';
 import readline from 'readline';
-import crypto from 'crypto';
+import OpenAI from 'openai';
 
 const DOCS_DIR = path.resolve('data', 'company-data');
 const CACHE_PATH = path.resolve('.cache', 'embeddings.json');
 const CHUNK_SIZE = 400; // characters
-const EMBEDDING_DIM = 1536;
 
 type Chunk = { source: string; content: string };
 
@@ -30,38 +29,14 @@ interface CacheFile {
 
 // ---------------- Embeddings ------------------
 
-function openaiAvailable(): boolean {
-  return Boolean(process.env.OPENAI_API_KEY);
-}
+let openai: OpenAI;
 
 async function embedTexts(texts: string[]): Promise<number[][]> {
-  if (openaiAvailable()) {
-    // Dynamically import to avoid failure in mock mode
-    const { default: OpenAI } = await import('openai');
-    const openai = new OpenAI();
-    const resp = await openai.embeddings.create({
-      input: texts,
-      model: 'text-embedding-ada-002'
-    });
-    // @ts-ignore
-    return resp.data.map((d: any) => d.embedding as number[]);
-  }
-  // Mock deterministic sha256 → floats
-  return texts.map((t) => shaEmbedding(t));
-}
-
-function shaEmbedding(text: string): number[] {
-  const hash = crypto.createHash('sha256').update(text).digest();
-  const repeats = Math.ceil((EMBEDDING_DIM * 4) / hash.length);
-  const bytes = Buffer.alloc(repeats * hash.length);
-  for (let i = 0; i < repeats; i++) {
-    hash.copy(bytes, i * hash.length);
-  }
-  const embedding: number[] = [];
-  for (let i = 0; i < EMBEDDING_DIM; i++) {
-    embedding.push(bytes[i * 4] / 255);
-  }
-  return embedding;
+  const resp = await openai.embeddings.create({
+    input: texts,
+    model: 'text-embedding-3-small'
+  });
+  return resp.data.map((d) => d.embedding);
 }
 
 // --------------- Chunking ---------------------
@@ -128,20 +103,12 @@ function retrieve(queryEmbed: number[], embeddings: number[][], k = 4): number[]
 type Message = { role: 'system' | 'user' | 'assistant'; content: string };
 
 async function chatCompletion(messages: Message[], temperature = 0): Promise<string> {
-  if (openaiAvailable()) {
-    const { default: OpenAI } = await import('openai');
-    const openai = new OpenAI();
-    const resp = await openai.chat.completions.create({
-      model: 'gpt-3.5-turbo',
-      messages,
-      temperature
-    });
-    // @ts-ignore
-    return resp.choices[0].message.content as string;
-  }
-  // mock deterministic concat lengths
-  const joined = messages.map((m) => `${m.role}-${m.content.length}`).join('|');
-  return `MOCK_RESPONSE[${joined}]`;
+  const resp = await openai.chat.completions.create({
+    model: 'gpt-3.5-turbo',
+    messages,
+    temperature
+  });
+  return resp.choices[0].message.content || '';
 }
 
 // -------------- Prompt helpers ---------------
@@ -157,11 +124,15 @@ async function proposeSearchQueries(question: string): Promise<string[]> {
   ]);
   try {
     const parsed = JSON.parse(raw);
-    if (Array.isArray(parsed)) return parsed.slice(0, 4).map(String);
+    if (Array.isArray(parsed)) {
+      const queries = parsed.slice(0, 4).map(String).filter(q => q.trim().length > 0);
+      if (queries.length > 0) return queries;
+    }
   } catch {
     /* ignore */
   }
-  return question.split(' ').slice(0, 4);
+  const fallback = question.split(' ').filter(q => q.trim().length > 0).slice(0, 4);
+  return fallback.length > 0 ? fallback : [question];
 }
 
 function buildContext(indices: number[], chunks: Chunk[]): string {
@@ -199,8 +170,14 @@ async function interactiveCLI() {
   const state = await ensureEmbeddings();
 
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  let closed = false;
+
+  rl.on('close', () => {
+    closed = true;
+  });
 
   const ask = (): void => {
+    if (closed) return;
     rl.question('\n> ', async (line) => {
       const q = line.trim();
       if (!q || q.toLowerCase() === 'exit' || q.toLowerCase() === 'quit') {
@@ -228,7 +205,29 @@ function wrap(text: string, width: number): string {
 
 // --------------- Main ------------------------
 
+async function promptForAPIKey(): Promise<string> {
+  return new Promise((resolve) => {
+    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+    rl.question('Enter your OpenAI API key: ', (answer) => {
+      rl.close();
+      resolve(answer.trim());
+    });
+  });
+}
+
 (async () => {
+  let apiKey = process.env.OPENAI_API_KEY;
+
+  if (!apiKey) {
+    apiKey = await promptForAPIKey();
+    if (!apiKey) {
+      console.error('Error: API key is required to run this CLI.');
+      process.exit(1);
+    }
+  }
+
+  openai = new OpenAI({ apiKey });
+
   const cmd = process.argv[2];
   if (cmd === 'train') {
     console.log('TODO: implement train command to ingest new data.');
