@@ -10,6 +10,7 @@
  *  - TODO stub for future `train` command
  */
 
+import fs from 'fs';
 import path from 'path';
 import readline from 'readline';
 import OpenAI from 'openai';
@@ -138,6 +139,50 @@ async function promptForAPIKey(): Promise<string> {
   });
 }
 
+async function addFile(filePath: string): Promise<void> {
+  // Validate file exists
+  if (!fs.existsSync(filePath)) {
+    console.error(`Error: File not found: ${filePath}`);
+    process.exit(1);
+  }
+
+  // Validate it's a file, not a directory
+  const stats = fs.statSync(filePath);
+  if (!stats.isFile()) {
+    console.error(`Error: ${filePath} is not a file`);
+    process.exit(1);
+  }
+
+  // Validate it's a markdown file
+  if (!filePath.endsWith('.md')) {
+    console.error('Error: Only .md (markdown) files are supported');
+    process.exit(1);
+  }
+
+  // Create destination path
+  const fileName = path.basename(filePath);
+  const destPath = path.join(DOCS_DIR, fileName);
+
+  // Check if file already exists
+  if (fs.existsSync(destPath)) {
+    console.error(`Error: File ${fileName} already exists in ${DOCS_DIR}`);
+    process.exit(1);
+  }
+
+  // Copy file to company data directory
+  console.log(`Adding ${fileName} to knowledge base...`);
+  fs.copyFileSync(filePath, destPath);
+  console.log(`✓ File copied to ${destPath}`);
+
+  // Rebuild embeddings cache
+  console.log('Rebuilding embeddings cache...');
+  await embeddingsService.rebuildCache();
+
+  const stats2 = embeddingsService.getCacheStats();
+  console.log(`✓ Cache rebuilt with ${stats2.chunkCount} chunks`);
+  console.log('File added successfully!');
+}
+
 (async () => {
   let apiKey = process.env.OPENAI_API_KEY;
 
@@ -152,13 +197,29 @@ async function promptForAPIKey(): Promise<string> {
   openai = new OpenAI({ apiKey });
   embeddingsService = new EmbeddingsService(openai, DOCS_DIR, CACHE_PATH);
 
-  const cmd = process.argv[2];
+  // Parse command line arguments
+  const args = process.argv.slice(2);
+  const cmd = args[0];
+
   if (cmd === 'train') {
     console.log('Rebuilding embeddings cache...');
     await embeddingsService.rebuildCache();
     console.log('Cache rebuilt successfully.');
     process.exit(0);
   }
+
+  if (cmd === '--add-file') {
+    const filePath = args[1];
+    if (!filePath) {
+      console.error('Error: --add-file requires a file path');
+      console.error('Usage: npx rag --add-file <path-to-file.md>');
+      process.exit(1);
+    }
+    await addFile(filePath);
+    process.exit(0);
+  }
+
+  // No command or unrecognized command - start interactive mode
   await interactiveCLI();
 })();
 

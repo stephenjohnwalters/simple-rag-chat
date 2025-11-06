@@ -56,9 +56,22 @@ local public holidays.
 > exit
 ```
 
+### Add a New Document
+
+Add a markdown file to the knowledge base and automatically rebuild the cache:
+
+```bash
+npx rag --add-file /path/to/document.md
+```
+
+This command will:
+1. Validate the file exists and is a `.md` file
+2. Copy it to `data/company-data/`
+3. Rebuild the embeddings cache with the new content
+
 ### Rebuild Cache
 
-Force rebuild of the embeddings cache (useful after adding/modifying documents):
+Force rebuild of the embeddings cache (useful after manually modifying documents):
 
 ```bash
 npx rag train
