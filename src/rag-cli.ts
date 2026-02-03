@@ -21,17 +21,27 @@ const CACHE_PATH = path.resolve('.cache', 'embeddings.json');
 
 let openai: OpenAI;
 let embeddingsService: EmbeddingsService;
+let debug = false;
 
 // -------------- LLM Wrapper ------------------
 
 type Message = { role: 'system' | 'user' | 'assistant'; content: string };
 
 async function chatCompletion(messages: Message[]): Promise<string> {
+  if (debug) {
+    console.log('\n[DEBUG] LLM Request:');
+    console.log(JSON.stringify({ model: 'gpt-5', messages }, null, 2));
+  }
   const resp = await openai.chat.completions.create({
     model: 'gpt-5',
     messages
   });
-  return resp.choices[0].message.content || '';
+  const content = resp.choices[0].message.content || '';
+  if (debug) {
+    console.log('\n[DEBUG] LLM Response:');
+    console.log(content);
+  }
+  return content;
 }
 
 // -------------- Prompt helpers ---------------
@@ -65,8 +75,13 @@ function buildContext(chunks: Chunk[]): string {
 }
 
 async function answerQuestion(question: string): Promise<string> {
+  if (debug) console.log('\n[DEBUG] Generating search queries...');
   const queries = await proposeSearchQueries(question);
+  if (debug) console.log('[DEBUG] Search queries:', queries);
+
+  if (debug) console.log('[DEBUG] Searching embeddings...');
   const chunks = await embeddingsService.multiSearch(queries, 3);
+  if (debug) console.log(`[DEBUG] Found ${chunks.length} chunks`);
 
   const context = buildContext(chunks);
 
@@ -197,7 +212,9 @@ async function addFile(filePath: string): Promise<void> {
 
   // Parse command line arguments
   const args = process.argv.slice(2);
-  const cmd = args[0];
+  debug = args.includes('--debug');
+  const filteredArgs = args.filter(a => a !== '--debug');
+  const cmd = filteredArgs[0];
 
   if (cmd === 'train') {
     console.log('Rebuilding embeddings cache...');
@@ -207,7 +224,7 @@ async function addFile(filePath: string): Promise<void> {
   }
 
   if (cmd === '--add-file') {
-    const filePath = args[1];
+    const filePath = filteredArgs[1];
     if (!filePath) {
       console.error('Error: --add-file requires a file path');
       console.error('Usage: npx rag --add-file <path-to-file.md>');
