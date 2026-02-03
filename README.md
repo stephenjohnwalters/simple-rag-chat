@@ -63,6 +63,14 @@ Force rebuild of the embeddings cache:
 npx rag train
 ```
 
+### Debug Mode
+
+See LLM requests/responses and search progress:
+
+```bash
+npx rag --debug
+```
+
 ## How It Works
 
 1. **Initialization**: Documents are chunked and embedded via `text-embedding-3-small`, then cached
