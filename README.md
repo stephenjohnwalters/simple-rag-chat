@@ -1,77 +1,63 @@
 # Simple RAG Chat
 
-A command-line Retrieval-Augmented Generation (RAG) system that answers questions about company documentation using OpenAI embeddings and chat completion.
+A minimal Retrieval-Augmented Generation (RAG) demo for answering questions about internal company documentation. Built as a simple example of how RAG systems work.
+
+## What It Does
+
+Ask natural language questions about company policies, benefits, procedures, and more. The system searches through markdown documents and generates answers based on the relevant content it finds.
 
 ## Architecture
 
-The system consists of three main components:
-
 ### 1. EmbeddingsService (`src/embeddings-service.ts`)
-Manages document processing and vector search:
 - **Chunking**: Splits markdown files into 400-character chunks
 - **Embedding**: Generates vector embeddings via OpenAI API
 - **Caching**: Persists embeddings to disk (`.cache/embeddings.json`)
-- **Search**: Performs cosine similarity search over cached embeddings
+- **Search**: Cosine similarity search over cached embeddings
 
 ### 2. RAG CLI (`src/rag-cli.ts`)
-Interactive command-line interface:
 - **Query generation**: Uses LLM to propose search queries
 - **Multi-search**: Retrieves relevant chunks using multiple queries
 - **Answer generation**: Synthesizes answers from retrieved context
 
 ### 3. Company Data (`data/company-data/`)
-Knowledge base of 20 markdown documents covering policies, procedures, and company information.
+Sample knowledge base of 20 markdown documents covering policies, procedures, and company information.
 
 ## Quick Start
 
 ```bash
-# Clone and setup
-git clone <repository-url>
-cd simple-rag-chat
-./setup.sh              # macOS/Linux: installs Node 18, dependencies
-
-# Or on Windows
-powershell -ExecutionPolicy Bypass -File setup.ps1
-
-# Set API key
+npm install
 export OPENAI_API_KEY="sk-..."
-
-# Run
-npx rag
+npm run build
+npm start
 ```
 
 If the API key is not set, the CLI will prompt for it interactively.
 
 ## Usage
 
-### Interactive Mode
+```
+$ npm start
 
-```bash
-npx rag
+Hey, I'm your company docs assistant! Ask me about policies, benefits, or procedures.
 
-> what is the vacation policy
-Employees accrue 20 days of paid time off per calendar year, in addition to
-local public holidays.
+> how many vacation days do I get
+Employees receive 20 days of PTO per year, plus holidays.
+
+> what's the 401k match
+4% match with immediate vesting.
 
 > exit
 ```
 
 ### Add a New Document
 
-Add a markdown file to the knowledge base and automatically rebuild the cache:
-
 ```bash
 npx rag --add-file /path/to/document.md
 ```
 
-This command will:
-1. Validate the file exists and is a `.md` file
-2. Copy it to `data/company-data/`
-3. Rebuild the embeddings cache with the new content
-
 ### Rebuild Cache
 
-Force rebuild of the embeddings cache (useful after manually modifying documents):
+Force rebuild of the embeddings cache:
 
 ```bash
 npx rag train
@@ -79,55 +65,22 @@ npx rag train
 
 ## How It Works
 
-1. **Initialization**: On first run, documents are chunked and embedded via `text-embedding-3-small`, then cached
-2. **Query Processing**: User questions are sent to GPT-3.5 to generate 2-4 search queries
-3. **Vector Search**: Each query is embedded and compared against cached embeddings using cosine similarity
-4. **Context Assembly**: Top matching chunks are combined into a context string
-5. **Answer Generation**: GPT-3.5 answers based strictly on the provided context
-
-## Files
-
-```
-simple-rag-chat/
-├── src/
-│   ├── embeddings-service.ts    # Vector search and caching
-│   └── rag-cli.ts               # CLI and answer generation
-├── data/
-│   └── company-data/            # 20 markdown knowledge base files
-├── .cache/
-│   └── embeddings.json          # Generated on first run (1.3MB)
-├── setup.sh                     # macOS/Linux setup script
-└── setup.ps1                    # Windows setup script
-```
+1. **Initialization**: Documents are chunked and embedded via `text-embedding-3-small`, then cached
+2. **Query Processing**: User questions generate 2-4 search queries via LLM
+3. **Vector Search**: Each query is embedded and compared against cached embeddings
+4. **Context Assembly**: Top matching chunks are combined into context
+5. **Answer Generation**: GPT-5 answers based strictly on the provided context
 
 ## Requirements
 
-- Node.js 18+ (installed automatically by setup scripts via Volta)
+- Node.js 18+
 - OpenAI API key with access to:
   - `text-embedding-3-small` model
-  - `gpt-3.5-turbo` model
+  - `gpt-5` model
 
 ## Configuration
 
-Key constants in `src/embeddings-service.ts`:
-- `CHUNK_SIZE`: 400 characters per chunk
+Key constants:
+- `CHUNK_SIZE`: 400 characters per chunk (in `embeddings-service.ts`)
 - Embedding model: `text-embedding-3-small`
-- Chat model: `gpt-3.5-turbo` (in `src/rag-cli.ts`)
-
-## Development
-
-```bash
-# Build TypeScript
-npm run build
-
-# Type checking
-npx tsc --noEmit
-
-# Clean and rebuild cache
-rm -rf .cache
-npx rag
-```
-
----
-
-Built with TypeScript, OpenAI API, and Node.js.
+- Chat model: `gpt-5`

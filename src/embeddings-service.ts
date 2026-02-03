@@ -152,7 +152,7 @@ export class EmbeddingsService {
     const denominator = normA * normB;
 
     if (denominator === 0) return 0;
-    return dotProduct / denominator;
+    return dotProduct / Math.sqrt(denominator);
   }
 
   /**
@@ -179,7 +179,7 @@ export class EmbeddingsService {
       });
     }
 
-    scores.sort((a, b) => a.score - b.score);
+    scores.sort((a, b) => b.score - a.score);
 
     return scores.slice(0, k);
   }

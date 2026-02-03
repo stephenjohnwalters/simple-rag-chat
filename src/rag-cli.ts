@@ -26,11 +26,10 @@ let embeddingsService: EmbeddingsService;
 
 type Message = { role: 'system' | 'user' | 'assistant'; content: string };
 
-async function chatCompletion(messages: Message[], temperature = 0): Promise<string> {
+async function chatCompletion(messages: Message[]): Promise<string> {
   const resp = await openai.chat.completions.create({
-    model: 'gpt-3.5-turbo',
-    messages,
-    temperature
+    model: 'gpt-5',
+    messages
   });
   return resp.choices[0].message.content || '';
 }
@@ -71,14 +70,11 @@ async function answerQuestion(question: string): Promise<string> {
 
   const context = buildContext(chunks);
 
-  const response = await chatCompletion(
-    [
-      { role: 'system', content: SYSTEM_ANSWER },
-      { role: 'system', content: `Context:\n${context}` },
-      { role: 'user', content: question }
-    ],
-    0.2
-  );
+  const response = await chatCompletion([
+    { role: 'system', content: SYSTEM_ANSWER },
+    { role: 'system', content: `Context:\n${context}` },
+    { role: 'user', content: question }
+  ]);
   return response;
 }
 
@@ -92,6 +88,8 @@ async function interactiveCLI() {
 
   const stats = embeddingsService.getCacheStats();
   console.log(`Loaded ${stats.chunkCount} chunks (embedding dim: ${stats.embeddingDim})`);
+
+  console.log("\nHey, I'm your company docs assistant! Ask me about policies, benefits, or procedures.");
 
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
   let closed = false;
